@@ -2,11 +2,15 @@ from datetime import date
 import sqlite3
 from pathlib import Path
 
+from fpdf import FPDF
+from fpdf.enums import XPos, YPos
 import pandas as pd
 import streamlit as st
 
 DB_PATH = Path("caisse_scolaire.db")
 APP_PASSWORD = "CSD2026"
+SCHOOL_NAME = "Complexe Scolaire Dougouracoro Sema"
+SCHOOL_PHONE = "Tél: 75172000"
 MONTHS = [
     "Septembre",
     "Octobre",
@@ -92,6 +96,126 @@ def load_mouvements(mois=None):
     return df
 
 
+def clean_pdf_text(value):
+    return str(value).encode("latin-1", "replace").decode("latin-1")
+
+
+def money(value):
+    return f"{float(value):,.2f}".replace(",", " ")
+
+
+def pdf_to_bytes(pdf):
+    output = pdf.output()
+    if isinstance(output, str):
+        return output.encode("latin-1")
+    return bytes(output)
+
+
+def add_pdf_header(pdf, title):
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 8, clean_pdf_text(SCHOOL_NAME), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
+    pdf.set_font("Helvetica", "", 11)
+    pdf.cell(0, 7, clean_pdf_text(SCHOOL_PHONE), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
+    pdf.ln(6)
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(0, 8, clean_pdf_text(title), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
+    pdf.ln(5)
+
+
+def add_direction_signature(pdf):
+    pdf.ln(10)
+    if pdf.get_y() > 245:
+        pdf.add_page()
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 8, "Direction", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="R")
+    pdf.set_font("Helvetica", "", 11)
+    pdf.cell(0, 18, "", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 8, "Signature: ______________________________", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="R")
+
+
+def generate_receipt_pdf(row, mois):
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    add_pdf_header(pdf, "Reçu de caisse")
+
+    movement_type = "Entrée" if float(row.entree) > 0 else "Sortie"
+    amount = row.entree if float(row.entree) > 0 else row.sortie
+    balance = float(row.entree) - float(row.sortie)
+
+    pdf.set_font("Helvetica", "", 12)
+    fields = [
+        ("N° reçu", row.id),
+        ("Mois", mois),
+        ("Date", row.date),
+        ("Désignation", row.designation),
+        ("Nom", row.nom),
+        ("Classe", row.classe),
+        ("Type de mouvement", movement_type),
+        ("Montant", money(amount)),
+        ("Solde de la ligne", money(balance)),
+    ]
+
+    for label, value in fields:
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(45, 8, clean_pdf_text(f"{label}:"), border=0)
+        pdf.set_font("Helvetica", "", 11)
+        pdf.cell(0, 8, truncate_pdf_text(value, 85), border=0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    add_direction_signature(pdf)
+    return pdf_to_bytes(pdf)
+
+
+def truncate_pdf_text(value, max_length):
+    text = clean_pdf_text(value)
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 3] + "..."
+
+
+def generate_monthly_summary_pdf(df, mois):
+    pdf = FPDF(orientation="L")
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    add_pdf_header(pdf, f"Résumé mensuel - {mois}")
+
+    total_entrees = df["entree"].sum()
+    total_sorties = df["sortie"].sum()
+    solde_final = total_entrees - total_sorties
+
+    pdf.set_font("Helvetica", "B", 10)
+    widths = [24, 68, 42, 25, 30, 30, 30]
+    headers = ["Date", "Désignation", "Nom", "Classe", "Entrée", "Sortie", "Solde"]
+    for header, width in zip(headers, widths):
+        pdf.cell(width, 8, clean_pdf_text(header), border=1, align="C")
+    pdf.ln()
+
+    pdf.set_font("Helvetica", "", 9)
+    for row in df.itertuples(index=False):
+        values = [
+            clean_pdf_text(row.date),
+            truncate_pdf_text(row.designation, 36),
+            truncate_pdf_text(row.nom, 24),
+            truncate_pdf_text(row.classe, 12),
+            money(row.entree),
+            money(row.sortie),
+            money(row.solde),
+        ]
+        alignments = ["L", "L", "L", "L", "R", "R", "R"]
+        for value, width, alignment in zip(values, widths, alignments):
+            pdf.cell(width, 8, value, border=1, align=alignment)
+        pdf.ln()
+
+    pdf.ln(6)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 8, clean_pdf_text(f"Total entrées: {money(total_entrees)}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 8, clean_pdf_text(f"Total sorties: {money(total_sorties)}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 8, clean_pdf_text(f"Solde final: {money(solde_final)}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    add_direction_signature(pdf)
+    return pdf_to_bytes(pdf)
+
+
 def format_table(df):
     display_df = df.rename(
         columns={
@@ -152,6 +276,17 @@ def show_logout():
 def show_month(mois):
     st.subheader(mois)
 
+    df = load_mouvements(mois)
+
+    st.download_button(
+        "Imprimer le résumé du mois",
+        data=generate_monthly_summary_pdf(df, mois) if not df.empty else b"",
+        file_name=f"resume_{mois.lower()}.pdf",
+        mime="application/pdf",
+        disabled=df.empty,
+        key=f"summary-pdf-{mois}",
+    )
+
     with st.form(f"form-{mois}", clear_on_submit=True):
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -176,8 +311,6 @@ def show_month(mois):
             st.success("Ligne ajoutée.")
             st.rerun()
 
-    df = load_mouvements(mois)
-
     if df.empty:
         st.info("Aucune donnée pour ce mois.")
         return
@@ -194,7 +327,7 @@ def show_month(mois):
     st.dataframe(
         format_table(df),
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "Entrée": st.column_config.NumberColumn(format="%.2f"),
             "Sortie": st.column_config.NumberColumn(format="%.2f"),
@@ -204,17 +337,34 @@ def show_month(mois):
     )
 
     st.divider()
-    st.subheader("Supprimer une ligne")
-    st.warning("Sélectionnez la ligne à supprimer, puis cliquez sur le bouton ci-dessous.")
-    options = {
-        f"ID {row.id} — {row.date} — {row.designation} — {row.nom}": int(row.id)
-        for row in df.itertuples(index=False)
-    }
-    selected_label = st.selectbox("Choisir la ligne à supprimer", list(options.keys()), key=f"delete-select-{mois}")
-    if st.button("Supprimer la ligne sélectionnée", key=f"delete-button-{mois}", type="primary"):
-        delete_mouvement(options[selected_label])
-        st.success("Ligne supprimée.")
-        st.rerun()
+    delete_col, receipt_col = st.columns([1, 1])
+
+    with delete_col:
+        st.subheader("Supprimer une ligne")
+        st.warning("Sélectionnez la ligne à supprimer, puis cliquez sur le bouton ci-dessous.")
+        options = {
+            f"ID {row.id} — {row.date} — {row.designation} — {row.nom}": int(row.id)
+            for row in df.itertuples(index=False)
+        }
+        selected_label = st.selectbox("Choisir la ligne à supprimer", list(options.keys()), key=f"delete-select-{mois}")
+        if st.button("Supprimer la ligne sélectionnée", key=f"delete-button-{mois}", type="primary"):
+            delete_mouvement(options[selected_label])
+            st.success("Ligne supprimée.")
+            st.rerun()
+
+    with receipt_col:
+        st.subheader("Reçus")
+        st.write("Générez un reçu PDF pour chaque ligne du tableau.")
+        for row in df.itertuples(index=False):
+            row_col, button_col = st.columns([2, 1])
+            row_col.write(f"ID {row.id} — {row.date} — {row.nom}")
+            button_col.download_button(
+                "Générer Reçu",
+                data=generate_receipt_pdf(row, mois),
+                file_name=f"recu_{mois.lower()}_{row.id}.pdf",
+                mime="application/pdf",
+                key=f"receipt-pdf-{mois}-{row.id}",
+            )
 
 
 def show_global_summary():
