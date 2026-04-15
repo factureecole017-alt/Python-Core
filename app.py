@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 
 DB_PATH = Path("caisse_scolaire.db")
+APP_PASSWORD = "CSD2026"
 MONTHS = [
     "Septembre",
     "Octobre",
@@ -121,6 +122,33 @@ def format_table(df):
     ]
 
 
+def check_password():
+    if st.session_state.get("authenticated"):
+        return True
+
+    st.title("Connexion")
+    st.write("Entrez le mot de passe pour accéder à la caisse scolaire.")
+
+    with st.form("login-form"):
+        password = st.text_input("Mot de passe", type="password")
+        submitted = st.form_submit_button("Se connecter")
+
+    if submitted:
+        if password == APP_PASSWORD:
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("Mot de passe incorrect.")
+
+    return False
+
+
+def show_logout():
+    if st.sidebar.button("Se déconnecter"):
+        st.session_state["authenticated"] = False
+        st.rerun()
+
+
 def show_month(mois):
     st.subheader(mois)
 
@@ -175,13 +203,15 @@ def show_month(mois):
         },
     )
 
-    st.write("Supprimer une ligne")
+    st.divider()
+    st.subheader("Supprimer une ligne")
+    st.warning("Sélectionnez la ligne à supprimer, puis cliquez sur le bouton ci-dessous.")
     options = {
         f"ID {row.id} — {row.date} — {row.designation} — {row.nom}": int(row.id)
         for row in df.itertuples(index=False)
     }
     selected_label = st.selectbox("Choisir la ligne à supprimer", list(options.keys()), key=f"delete-select-{mois}")
-    if st.button("Supprimer la ligne sélectionnée", key=f"delete-button-{mois}"):
+    if st.button("Supprimer la ligne sélectionnée", key=f"delete-button-{mois}", type="primary"):
         delete_mouvement(options[selected_label])
         st.success("Ligne supprimée.")
         st.rerun()
@@ -201,11 +231,16 @@ def show_global_summary():
 
 def main():
     st.set_page_config(page_title="Caisse scolaire", layout="wide")
+
+    if not check_password():
+        return
+
     init_db()
 
     st.title("Gestion de caisse scolaire")
     st.write("Ajoutez les entrées et sorties de caisse, mois par mois. Les données sont enregistrées dans SQLite.")
 
+    show_logout()
     show_global_summary()
 
     tabs = st.tabs(MONTHS)
