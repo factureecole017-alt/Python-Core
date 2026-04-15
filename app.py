@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 DB_PATH = Path("caisse_scolaire.db")
+LOGO_PATH = Path("logo.png")
 APP_PASSWORD = "CSD2026"
 SCHOOL_NAME = "Complexe Scolaire Dougouracoro Sema"
 SCHOOL_PHONE = "Tél: 75172000"
@@ -112,6 +113,11 @@ def pdf_to_bytes(pdf):
 
 
 def add_pdf_header(pdf, title):
+    if LOGO_PATH.exists():
+        logo_width = 36
+        pdf.image(str(LOGO_PATH), x=(pdf.w - logo_width) / 2, y=10, w=logo_width)
+        pdf.set_y(48)
+
     pdf.set_font("Helvetica", "B", 14)
     pdf.cell(0, 8, clean_pdf_text(SCHOOL_NAME), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
     pdf.set_font("Helvetica", "", 11)
@@ -123,14 +129,17 @@ def add_pdf_header(pdf, title):
 
 
 def add_direction_signature(pdf):
-    pdf.ln(10)
-    if pdf.get_y() > 245:
+    if pdf.get_y() > pdf.h - 55:
         pdf.add_page()
+    pdf.set_y(pdf.h - 48)
+    pdf.set_x(pdf.w - 100)
     pdf.set_font("Helvetica", "B", 11)
-    pdf.cell(0, 8, "Direction", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="R")
+    pdf.cell(85, 8, "Direction", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
     pdf.set_font("Helvetica", "", 11)
-    pdf.cell(0, 18, "", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.cell(0, 8, "Signature: ______________________________", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="R")
+    pdf.set_x(pdf.w - 100)
+    pdf.cell(85, 18, "", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_x(pdf.w - 100)
+    pdf.cell(85, 8, "Signature: ______________________________", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
 
 
 def generate_receipt_pdf(row, mois):
