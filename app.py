@@ -1,6 +1,8 @@
 from datetime import date
+import re
 import sqlite3
 from pathlib import Path
+import unicodedata
 
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
@@ -105,6 +107,17 @@ def money(value):
     return f"{float(value):,.2f}".replace(",", " ")
 
 
+def safe_filename_part(value):
+    normalized = unicodedata.normalize("NFKD", str(value))
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "_", ascii_text).strip("_")
+    return cleaned or "Eleve"
+
+
+def receipt_file_name(row):
+    return f"Recu_{safe_filename_part(row.nom)}.pdf"
+
+
 def pdf_to_bytes(pdf):
     output = pdf.output()
     if isinstance(output, str):
@@ -128,18 +141,23 @@ def add_pdf_header(pdf, title):
     pdf.ln(5)
 
 
-def add_direction_signature(pdf):
-    if pdf.get_y() > pdf.h - 55:
+def add_direction_signature(pdf, compact=False):
+    if compact:
+        pdf.ln(6)
+        if pdf.get_y() > pdf.h - 42:
+            pdf.add_page()
+    elif pdf.get_y() > pdf.h - 55:
         pdf.add_page()
-    pdf.set_y(pdf.h - 48)
+    if not compact:
+        pdf.set_y(pdf.h - 48)
     pdf.set_x(pdf.w - 100)
     pdf.set_font("Helvetica", "B", 11)
-    pdf.cell(85, 8, "Direction", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
+    pdf.cell(85, 8, "Direction", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="R")
     pdf.set_font("Helvetica", "", 11)
     pdf.set_x(pdf.w - 100)
     pdf.cell(85, 18, "", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_x(pdf.w - 100)
-    pdf.cell(85, 8, "Signature: ______________________________", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
+    pdf.cell(85, 8, "Signature: ______________________________", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="R")
 
 
 def generate_receipt_pdf(row, mois):
@@ -160,18 +178,15 @@ def generate_receipt_pdf(row, mois):
         ("Désignation", row.designation),
         ("Nom", row.nom),
         ("Classe", row.classe),
-        ("Type de mouvement", movement_type),
         ("Montant", money(amount)),
-        ("Solde de la ligne", money(balance)),
     ]
-
     for label, value in fields:
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(45, 8, clean_pdf_text(f"{label}:"), border=0)
         pdf.set_font("Helvetica", "", 11)
         pdf.cell(0, 8, truncate_pdf_text(value, 85), border=0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-
-    add_direction_signature(pdf)
+    
+    add_direction_signature(pdf, compact=True)
     return pdf_to_bytes(pdf)
 
 
@@ -370,7 +385,7 @@ def show_month(mois):
             button_col.download_button(
                 "Générer Reçu",
                 data=generate_receipt_pdf(row, mois),
-                file_name=f"recu_{mois.lower()}_{row.id}.pdf",
+                file_name=receipt_file_name(row),
                 mime="application/pdf",
                 key=f"receipt-pdf-{mois}-{row.id}",
             )
