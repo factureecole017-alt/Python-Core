@@ -1,4 +1,5 @@
 from datetime import date
+import os
 import re
 import sqlite3
 from pathlib import Path
@@ -11,7 +12,7 @@ import streamlit as st
 
 DB_PATH = Path("caisse_scolaire.db")
 LOGO_PATH = Path("logo.png")
-APP_PASSWORD = "CSD2026"
+ENV_PATH = Path(".env")
 SCHOOL_NAME = "Complexe Scolaire Dougouracoro Sema"
 SCHOOL_PHONE = "Tél: 75172000"
 MONTHS = [
@@ -29,6 +30,21 @@ MONTHS = [
 
 def get_connection():
     return sqlite3.connect(DB_PATH)
+
+
+def load_env_file():
+    if not ENV_PATH.exists():
+        return
+
+    for line in ENV_PATH.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("\"'")
+        if key:
+            os.environ.setdefault(key, value)
 
 
 def init_db():
@@ -282,7 +298,10 @@ def check_password():
         submitted = st.form_submit_button("Se connecter")
 
     if submitted:
-        if password == APP_PASSWORD:
+        expected_password = os.getenv("MON_MOT_DE_PASSE")
+        if not expected_password:
+            st.error("Le mot de passe n'est pas configuré.")
+        elif password == expected_password:
             st.session_state["authenticated"] = True
             st.rerun()
         else:
@@ -405,6 +424,7 @@ def show_global_summary():
 
 def main():
     st.set_page_config(page_title="Caisse scolaire", layout="wide")
+    load_env_file()
 
     if not check_password():
         return
